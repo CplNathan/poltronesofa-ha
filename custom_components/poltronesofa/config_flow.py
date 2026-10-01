@@ -11,7 +11,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResu
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import callback
 
-from . import CONF_TRAVEL_SECONDS, DOMAIN
+from . import CONF_STAY_CONNECTED, CONF_TRAVEL_SECONDS, DOMAIN
 from .sofa import DEFAULT_TRAVEL_SECONDS, MANUFACTURER_ID
 
 
@@ -62,17 +62,18 @@ class SeatConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class SeatOptionsFlow(OptionsFlow):
-    """How long the seat takes to fully open or close, which the position slider is worked out from."""
+    """Travel time for the position slider, and whether to hold the seat's only connection."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             return self.async_create_entry(data=user_input)
-        current = self.config_entry.options.get(CONF_TRAVEL_SECONDS, DEFAULT_TRAVEL_SECONDS)
+        options = self.config_entry.options
         schema = vol.Schema(
             {
-                vol.Required(CONF_TRAVEL_SECONDS, default=current): vol.All(
-                    vol.Coerce(float), vol.Range(min=1, max=120)
-                )
+                vol.Required(
+                    CONF_TRAVEL_SECONDS, default=options.get(CONF_TRAVEL_SECONDS, DEFAULT_TRAVEL_SECONDS)
+                ): vol.All(vol.Coerce(float), vol.Range(min=1, max=120)),
+                vol.Required(CONF_STAY_CONNECTED, default=options.get(CONF_STAY_CONNECTED, False)): bool,
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

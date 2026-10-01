@@ -20,11 +20,14 @@ Home Assistant finds each seat on its own and adds it as a device with:
 3. Install **poltronesofà recliner** and restart Home Assistant.
 4. The seats should then appear under **Settings → Devices & services** as discovered devices. If they don't, choose **Add integration** and search for "poltronesofà".
 
-A seat takes one Bluetooth connection at a time. Home Assistant lets go of a seat 10 seconds after the longest possible move (22 seconds with the default setting), so the phone app can connect again after that.
+A seat takes one Bluetooth connection at a time. By default, Home Assistant lets go of a seat 10 seconds after the longest possible move (22 seconds with the default setting), so the phone app can connect again after that. If you turn on **Stay connected**, Home Assistant keeps the connection all the time instead.
 
 ## Settings
 
-Each seat has a **Configure** button under **Settings → Devices & services → poltronesofà recliner**. Use it to set how many seconds the seat takes to fully open or close. The default is 12. Time your own seat and enter that, so the position slider matches where the seat really is.
+Each seat has a **Configure** button under **Settings → Devices & services → poltronesofà recliner**. There are two settings:
+
+- **Seconds to fully open or close**: the default is 12. Time your own seat and enter that, so the position slider matches where the seat really is.
+- **Stay connected**: keeps the seat connected all the time and reconnects if the link drops, so the seat responds straight away and the child lock updates as soon as it changes. While it's on, the phone app can't connect to that seat. It's off by default.
 
 If you've set a Bluetooth PIN in the app, change `PIN` at the top of `custom_components/poltronesofa/sofa.py` to match. `0` means no PIN.
 

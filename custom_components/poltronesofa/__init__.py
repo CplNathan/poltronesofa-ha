@@ -15,6 +15,7 @@ from .sofa import DEFAULT_TRAVEL_SECONDS, Seat
 
 DOMAIN = "poltronesofa"
 CONF_TRAVEL_SECONDS = "travel_seconds"
+CONF_STAY_CONNECTED = "stay_connected"
 PLATFORMS = [Platform.COVER, Platform.BUTTON, Platform.SWITCH]
 
 type SeatConfigEntry = ConfigEntry[Seat]
@@ -34,6 +35,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: SeatConfigEntry) -> bool
         await seat.disconnect()
 
     entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _disconnect_on_stop))
+    if entry.options.get(CONF_STAY_CONNECTED, False):
+        entry.async_create_background_task(hass, seat.hold(), f"{DOMAIN} hold {address}")
     entry.async_on_unload(
         bluetooth.async_register_callback(
             hass,

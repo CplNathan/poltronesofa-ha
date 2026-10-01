@@ -37,6 +37,8 @@ CHILD_LOCK = 0x0337
 PIN_IN = 0xF000
 
 DEFAULT_TRAVEL_SECONDS = 12.0
+RECONNECT_SECONDS = 5
+MAX_RECONNECT_SECONDS = 60
 # ponytail: fixed PIN; make it an option once someone sets one in the app.
 PIN = 0
 
@@ -66,6 +68,7 @@ class Seat:
         self._state_seen = asyncio.Event()
         self._listeners: list[Callable[[], None]] = []
         self.locked: bool | None = None
+        self._holding = False
 
     def set_device(self, device: BLEDevice) -> None:
         self._device = device
@@ -100,7 +103,22 @@ class Seat:
                 await self._write(CTRL, LOCK_TOGGLE)
                 await asyncio.wait_for(self._state_seen.wait(), 2)
 
+    async def hold(self) -> None:
+        """Keep the link open, reconnecting when it drops, until disconnect(). Blocks the phone app."""
+        self._holding = True
+        retry = RECONNECT_SECONDS
+        while self._holding:
+            if self._client is None or not self._client.is_connected:
+                try:
+                    await self.refresh()
+                    retry = RECONNECT_SECONDS
+                except (BleakError, TimeoutError) as err:
+                    _LOGGER.debug("Reconnect to %s failed: %s", self._device.address, err)
+                    retry = min(retry * 2, MAX_RECONNECT_SECONDS)
+            await asyncio.sleep(retry)
+
     async def disconnect(self) -> None:
+        self._holding = False
         async with self._busy:
             await self._drop()
 
@@ -152,6 +170,8 @@ class Seat:
         await self._client.write_gatt_char(WRITE, frame(self._counter, group, code, param), response=False)
 
     def _keep_alive(self) -> None:
+        if self._holding:
+            return
         if self._idle:
             self._idle.cancel()
         loop = asyncio.get_running_loop()
@@ -205,4 +225,12 @@ if __name__ == "__main__":
         assert client.disconnected and seat._client is None and seat._idle is None
 
     asyncio.run(_half_open_is_dropped())
-    print("half-open link dropped ok")
+
+    async def _holding_never_idles() -> None:
+        seat = Seat(BLEDevice("00:00:00:00:00:00", "test", None), 12.0)
+        seat._holding = True
+        seat._keep_alive()
+        assert seat._idle is None
+
+    asyncio.run(_holding_never_idles())
+    print("half-open link dropped, holding never idles: ok")

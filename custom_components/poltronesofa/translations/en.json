@@ -2,10 +2,14 @@
   "config": {
     "flow_title": "{name}",
     "step": {
-      "confirm": { "description": "Add {name}?" },
+      "confirm": {
+        "description": "Add {name}?"
+      },
       "user": {
         "description": "Pick the sofa seat to add.",
-        "data": { "address": "Seat" }
+        "data": {
+          "address": "Seat"
+        }
       }
     },
     "abort": {
@@ -16,9 +20,13 @@
   "options": {
     "step": {
       "init": {
-        "data": { "travel_seconds": "Seconds to fully open or close" },
+        "data": {
+          "travel_seconds": "Seconds to fully open or close",
+          "stay_connected": "Stay connected"
+        },
         "data_description": {
-          "travel_seconds": "Time your seat from fully closed to fully open. The position slider is worked out from this."
+          "travel_seconds": "Time your seat from fully closed to fully open. The position slider is worked out from this.",
+          "stay_connected": "Keep the seat connected all the time, so it responds straight away. While this is on, the phone app can't connect to this seat."
         }
       }
     }
