@@ -69,6 +69,7 @@ class Seat:
         self._listeners: list[Callable[[], None]] = []
         self.locked: bool | None = None
         self._holding = False
+        self._link_lost = asyncio.Event()
 
     def set_device(self, device: BLEDevice) -> None:
         self._device = device
@@ -104,7 +105,7 @@ class Seat:
                 await asyncio.wait_for(self._state_seen.wait(), 2)
 
     async def hold(self) -> None:
-        """Keep the link open, reconnecting when it drops, until disconnect(). Blocks the phone app."""
+        """Keep the link open for good, reconnecting whenever it drops, until disconnect(). Blocks the phone app."""
         self._holding = True
         retry = RECONNECT_SECONDS
         while self._holding:
@@ -115,7 +116,16 @@ class Seat:
                 except (BleakError, TimeoutError) as err:
                     _LOGGER.debug("Reconnect to %s failed: %s", self._device.address, err)
                     retry = min(retry * 2, MAX_RECONNECT_SECONDS)
-            await asyncio.sleep(retry)
+                except Exception:
+                    # Anything unexpected must not end the loop, or the seat is never held again.
+                    _LOGGER.exception("Unexpected error reconnecting to %s", self._device.address)
+                    retry = MAX_RECONNECT_SECONDS
+            # Cleared after the attempt, so a drop caused by a failed attempt doesn't skip the back-off.
+            self._link_lost.clear()
+            try:
+                await asyncio.wait_for(self._link_lost.wait(), retry)
+            except TimeoutError:
+                pass
 
     async def disconnect(self) -> None:
         self._holding = False
@@ -197,6 +207,7 @@ class Seat:
 
     def _on_disconnect(self, _client: BleakClient) -> None:
         self._client = None
+        self._link_lost.set()
 
     def _on_notify(self, _sender: object, data: bytearray) -> None:
         locked = lock_state(bytes(data))
@@ -284,4 +295,24 @@ if __name__ == "__main__":
         await seat.disconnect()
 
     asyncio.run(_stale_services_are_retried())
-    print("half-open link dropped, holding never idles, stale services retried: ok")
+
+    async def _hold_survives_any_error() -> None:
+        globals()["RECONNECT_SECONDS"] = globals()["MAX_RECONNECT_SECONDS"] = 0.01
+        seat = Seat(BLEDevice("00:00:00:00:00:00", "test", None), 12.0)
+        calls = 0
+
+        async def _flaky_refresh() -> None:
+            nonlocal calls
+            calls += 1
+            raise [BleakError("gone"), TimeoutError(), RuntimeError("odd")][calls % 3]
+
+        seat.refresh = _flaky_refresh
+        holder = asyncio.create_task(seat.hold())
+        await asyncio.sleep(0.3)
+        assert not holder.done() and calls >= 6, calls
+        await seat.disconnect()
+        await asyncio.wait_for(holder, 1)
+
+    logging.disable(logging.CRITICAL)
+    asyncio.run(_hold_survives_any_error())
+    print("half-open link dropped, holding never idles, stale services retried, hold survives errors: ok")

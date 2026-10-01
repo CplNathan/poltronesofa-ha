@@ -27,7 +27,7 @@ A seat takes one Bluetooth connection at a time. By default, Home Assistant lets
 Each seat has a **Configure** button under **Settings → Devices & services → poltronesofà recliner**. There are two settings:
 
 - **Seconds to fully open or close**: the default is 12. Time your own seat and enter that, so the position slider matches where the seat really is.
-- **Stay connected**: keeps the seat connected all the time and reconnects if the link drops, so the seat responds straight away and the child lock updates as soon as it changes. While it's on, the phone app can't connect to that seat. It's off by default.
+- **Stay connected**: keeps the seat connected all the time. If the link drops, it reconnects straight away and keeps trying for as long as it takes (every 5 seconds at first, then up to once a minute), so the seat responds straight away and the child lock updates as soon as it changes. While it's on, the phone app can't connect to that seat. It's off by default.
 
 If you've set a Bluetooth PIN in the app, change `PIN` at the top of `custom_components/poltronesofa/sofa.py` to match. `0` means no PIN.
 
