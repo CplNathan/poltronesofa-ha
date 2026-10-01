@@ -1,0 +1,7 @@
+# Local ESPHome experiment: holds Wi-Fi secrets and device addresses, never published.
+secrets.yaml
+sofa.yaml
+seat.yaml
+compile.log
+.esphome/
+__pycache__/

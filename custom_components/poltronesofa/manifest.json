@@ -1,0 +1,13 @@
+{
+  "domain": "poltronesofa",
+  "name": "poltronesofà recliner",
+  "bluetooth": [{ "manufacturer_id": 1115, "local_name": "ECBLE*", "connectable": true }],
+  "codeowners": ["@CplNathan"],
+  "config_flow": true,
+  "dependencies": ["bluetooth_adapters"],
+  "documentation": "https://github.com/CplNathan/poltronesofa-ha",
+  "iot_class": "assumed_state",
+  "issue_tracker": "https://github.com/CplNathan/poltronesofa-ha/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

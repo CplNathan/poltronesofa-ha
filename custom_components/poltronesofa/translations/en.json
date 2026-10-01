@@ -1,0 +1,16 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "confirm": { "description": "Add {name}?" },
+      "user": {
+        "description": "Pick the sofa seat to add.",
+        "data": { "address": "Seat" }
+      }
+    },
+    "abort": {
+      "already_configured": "This seat is already added.",
+      "no_devices_found": "No sofa seats found nearby. Check Bluetooth is on and the phone app isn't connected."
+    }
+  }
+}
