@@ -6,8 +6,8 @@ from bleak.exc import BleakError
 
 from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
+from homeassistant.core import Event, HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceInfo
 
@@ -28,6 +28,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: SeatConfigEntry) -> bool
     seat = Seat(device, entry.options.get(CONF_TRAVEL_SECONDS, DEFAULT_TRAVEL_SECONDS))
     entry.runtime_data = seat
     entry.async_on_unload(entry.add_update_listener(_reload))
+
+    # The host's Bluetooth stack owns the link and outlives HA, so let go of the seat on shutdown.
+    async def _disconnect_on_stop(_event: Event) -> None:
+        await seat.disconnect()
+
+    entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _disconnect_on_stop))
     entry.async_on_unload(
         bluetooth.async_register_callback(
             hass,

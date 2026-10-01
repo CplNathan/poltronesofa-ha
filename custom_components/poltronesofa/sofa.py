@@ -8,11 +8,13 @@ replies on NOTIFY. Kept free of Home Assistant imports so it can be tested on it
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 import logging
 
 from bleak import BleakClient
 from bleak.backends.device import BLEDevice
+from bleak.exc import BleakError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 _LOGGER = logging.getLogger(__name__)
@@ -73,27 +75,24 @@ class Seat:
         return lambda: self._listeners.remove(listener)
 
     async def send(self, code: int) -> None:
-        async with self._busy:
-            await self._connect()
+        async with self._connected():
             await self._write(CTRL, code)
 
     async def stop(self) -> None:
         """Stop the motors the way the app does: three stops, 20 ms apart."""
-        async with self._busy:
-            await self._connect()
+        async with self._connected():
             for _ in range(3):
                 await self._write(CTRL, STOP)
                 await asyncio.sleep(0.02)
 
     async def refresh(self) -> None:
         """Connect, which reads the lock state."""
-        async with self._busy:
-            await self._connect()
+        async with self._connected():
+            pass
 
     async def set_locked(self, locked: bool) -> None:
         """The sofa only offers a toggle, so toggle only when the state differs."""
-        async with self._busy:
-            await self._connect()
+        async with self._connected():
             if self.locked is None:
                 raise TimeoutError("The seat didn't say whether it's locked")
             if self.locked != locked:
@@ -102,26 +101,47 @@ class Seat:
                 await asyncio.wait_for(self._state_seen.wait(), 2)
 
     async def disconnect(self) -> None:
+        async with self._busy:
+            await self._drop()
+
+    @asynccontextmanager
+    async def _connected(self) -> AsyncIterator[None]:
+        """Run one action on a live link.
+
+        Any failure drops the link, so the seat's only connection is never left half-open.
+        """
+        async with self._busy:
+            try:
+                await self._connect()
+                yield
+            except BaseException:
+                await self._drop()
+                raise
+            self._keep_alive()
+
+    async def _drop(self) -> None:
         if self._idle:
             self._idle.cancel()
             self._idle = None
         client, self._client = self._client, None
-        if client:
+        if client is None:
+            return
+        try:
             await client.disconnect()
+        except BleakError as err:
+            _LOGGER.debug("Disconnect from %s failed: %s", self._device.address, err)
 
     async def _connect(self) -> None:
-        self._keep_alive()
         if self._client and self._client.is_connected:
             return
-        client = await establish_connection(
+        self._client = await establish_connection(
             BleakClientWithServiceCache,
             self._device,
             self._device.name or self._device.address,
             disconnected_callback=self._on_disconnect,
         )
-        self._client = client
         self._state_seen.clear()
-        await client.start_notify(NOTIFY, self._on_notify)
+        await self._client.start_notify(NOTIFY, self._on_notify)
         await self._write(SET_PARA, PIN_IN, PIN)
         await self._write(GET_STATE, CHILD_LOCK)
         await asyncio.wait_for(self._state_seen.wait(), 2)
@@ -159,3 +179,30 @@ if __name__ == "__main__":
     assert lock_state(bytes.fromhex("1282370300000000")) is False
     assert lock_state(bytes.fromhex("1181" "03f084610020")) is None
     print("frames ok")
+
+    class _FailingClient:
+        is_connected = True
+        disconnected = False
+
+        async def start_notify(self, *_args):
+            raise BleakError("notify refused")
+
+        async def disconnect(self):
+            self.disconnected = True
+
+    async def _half_open_is_dropped() -> None:
+        client = _FailingClient()
+
+        async def _fake_connect(*_args, **_kwargs):
+            return client
+
+        globals()["establish_connection"] = _fake_connect
+        seat = Seat(BLEDevice("00:00:00:00:00:00", "test", None), 12.0)
+        try:
+            await seat.send(OPEN)
+        except BleakError:
+            pass
+        assert client.disconnected and seat._client is None and seat._idle is None
+
+    asyncio.run(_half_open_is_dropped())
+    print("half-open link dropped ok")
