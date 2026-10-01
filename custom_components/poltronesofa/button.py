@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import SeatConfigEntry, device_info, reach
-from .sofa import GO_TO_MEMORY, SAVE_MEMORY, TRAVEL_SECONDS
+from .sofa import GO_TO_MEMORY, SAVE_MEMORY
 
 
 async def async_setup_entry(
@@ -41,7 +41,7 @@ class GoToMemory(MemoryButton):
         # The seat only moves while the command is "held": run for a full travel, then stop.
         # ponytail: the cover's position estimate isn't updated by memory moves; a full open or close resets it.
         await reach(self._seat.send(GO_TO_MEMORY[self._slot]))
-        await asyncio.sleep(TRAVEL_SECONDS)
+        await asyncio.sleep(self._seat.travel_seconds)
         await reach(self._seat.stop())
 
 

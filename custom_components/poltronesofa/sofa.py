@@ -34,11 +34,9 @@ LOCK_TOGGLE = 0x60A3
 CHILD_LOCK = 0x0337
 PIN_IN = 0xF000
 
-# ponytail: fixed travel time and PIN; move to an options flow if seats differ or a PIN gets set.
-TRAVEL_SECONDS = 25.0
+DEFAULT_TRAVEL_SECONDS = 12.0
+# ponytail: fixed PIN; make it an option once someone sets one in the app.
 PIN = 0
-# Stay connected past a full move so a stop never waits on a reconnect, then free the seat for the app.
-IDLE_DISCONNECT_SECONDS = TRAVEL_SECONDS + 10
 
 
 def frame(counter: int, group: int, code: int, param: int = 0) -> bytes:
@@ -56,8 +54,9 @@ def lock_state(reply: bytes) -> bool | None:
 class Seat:
     """One seat's motor controller, connected on demand."""
 
-    def __init__(self, device: BLEDevice) -> None:
+    def __init__(self, device: BLEDevice, travel_seconds: float) -> None:
         self._device = device
+        self.travel_seconds = travel_seconds
         self._client: BleakClient | None = None
         self._counter = 0
         self._busy = asyncio.Lock()
@@ -136,7 +135,8 @@ class Seat:
         if self._idle:
             self._idle.cancel()
         loop = asyncio.get_running_loop()
-        self._idle = loop.call_later(IDLE_DISCONNECT_SECONDS, lambda: loop.create_task(self.disconnect()))
+        # Stay connected past a full move so a stop never waits on a reconnect, then free the seat for the app.
+        self._idle = loop.call_later(self.travel_seconds + 10, lambda: loop.create_task(self.disconnect()))
 
     def _on_disconnect(self, _client: BleakClient) -> None:
         self._client = None

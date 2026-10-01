@@ -12,7 +12,7 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from . import SeatConfigEntry, device_info, reach
-from .sofa import CLOSE, OPEN, TRAVEL_SECONDS
+from .sofa import CLOSE, OPEN
 
 
 async def async_setup_entry(
@@ -75,7 +75,7 @@ class SeatCover(CoverEntity, RestoreEntity):
     def _now(self) -> float:
         if not self._direction:
             return self._position
-        travelled = (monotonic() - self._started) / TRAVEL_SECONDS * 100
+        travelled = (monotonic() - self._started) / self._seat.travel_seconds * 100
         return min(100.0, max(0.0, self._start_position + self._direction * travelled))
 
     async def _move_to(self, target: float) -> None:
@@ -86,7 +86,8 @@ class SeatCover(CoverEntity, RestoreEntity):
         if not at_end and abs(target - self._position) < 1:
             return
         direction = 1 if target > self._position or target == 100 else -1
-        seconds = TRAVEL_SECONDS if at_end else abs(target - self._position) / 100 * TRAVEL_SECONDS
+        share = 1 if at_end else abs(target - self._position) / 100
+        seconds = share * self._seat.travel_seconds
         await reach(self._seat.send(OPEN if direction > 0 else CLOSE))
         self._direction = direction
         self._start_position = self._position

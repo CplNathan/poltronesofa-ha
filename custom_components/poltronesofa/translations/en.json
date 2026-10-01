@@ -12,5 +12,15 @@
       "already_configured": "This seat is already added.",
       "no_devices_found": "No sofa seats found nearby. Check Bluetooth is on and the phone app isn't connected."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": { "travel_seconds": "Seconds to fully open or close" },
+        "data_description": {
+          "travel_seconds": "Time your seat from fully closed to fully open. The position slider is worked out from this."
+        }
+      }
+    }
   }
 }
