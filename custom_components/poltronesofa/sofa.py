@@ -152,12 +152,29 @@ class Seat:
     async def _connect(self) -> None:
         if self._client and self._client.is_connected:
             return
-        self._client = await establish_connection(
-            BleakClientWithServiceCache,
-            self._device,
-            self._device.name or self._device.address,
-            disconnected_callback=self._on_disconnect,
-        )
+        for attempt in range(2):
+            client = await establish_connection(
+                BleakClientWithServiceCache,
+                self._device,
+                self._device.name or self._device.address,
+                disconnected_callback=self._on_disconnect,
+            )
+            self._client = client
+            try:
+                await self._start_session()
+                return
+            except BleakError:
+                if attempt:
+                    raise
+                # BlueZ can reuse a stale service list whose characteristics no longer exist
+                # ("StartNotify ... doesn't exist"); forget it and connect once more.
+                _LOGGER.debug("Clearing stale services for %s", self._device.address)
+                await client.clear_cache()
+                await self._drop()
+
+    async def _start_session(self) -> None:
+        """Turn on replies, send the PIN and read the lock state, as the app does on connect."""
+        assert self._client
         self._state_seen.clear()
         await self._client.start_notify(NOTIFY, self._on_notify)
         await self._write(SET_PARA, PIN_IN, PIN)
@@ -210,6 +227,9 @@ if __name__ == "__main__":
         async def disconnect(self):
             self.disconnected = True
 
+        async def clear_cache(self):
+            return True
+
     async def _half_open_is_dropped() -> None:
         client = _FailingClient()
 
@@ -233,4 +253,35 @@ if __name__ == "__main__":
         assert seat._idle is None
 
     asyncio.run(_holding_never_idles())
-    print("half-open link dropped, holding never idles: ok")
+
+    class _StaleThenGoodClient(_FailingClient):
+        attempts = 0
+        cleared = False
+
+        async def start_notify(self, *_args):
+            _StaleThenGoodClient.attempts += 1
+            if _StaleThenGoodClient.attempts == 1:
+                raise BleakError("StartNotify doesn't exist")
+
+        async def clear_cache(self):
+            _StaleThenGoodClient.cleared = True
+            return True
+
+        async def write_gatt_char(self, *_args, **_kwargs):
+            pass
+
+    async def _stale_services_are_retried() -> None:
+        async def _fake_connect(*_args, **_kwargs):
+            return _StaleThenGoodClient()
+
+        globals()["establish_connection"] = _fake_connect
+        seat = Seat(BLEDevice("00:00:00:00:00:00", "test", None), 12.0)
+        connect = asyncio.create_task(seat.send(OPEN))
+        await asyncio.sleep(0.1)
+        seat._on_notify(None, bytearray.fromhex("0182370300000000"))
+        await connect
+        assert _StaleThenGoodClient.cleared and _StaleThenGoodClient.attempts == 2 and seat.locked is False
+        await seat.disconnect()
+
+    asyncio.run(_stale_services_are_retried())
+    print("half-open link dropped, holding never idles, stale services retried: ok")
