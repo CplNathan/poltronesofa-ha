@@ -91,15 +91,15 @@ class Seat:
                 await asyncio.sleep(0.02)
 
     async def refresh(self) -> None:
-        """Connect, which reads the lock state."""
+        """Read the lock state, connecting first if need be."""
         async with self._connected():
-            pass
+            await self._read_lock()
 
     async def set_locked(self, locked: bool) -> None:
         """The sofa only offers a toggle, so toggle only when the state differs."""
         async with self._connected():
-            if self.locked is None:
-                raise TimeoutError("The seat didn't say whether it's locked")
+            # Ask first: a held link never reconnects, so the last known state can be old.
+            await self._read_lock()
             if self.locked != locked:
                 self._state_seen.clear()
                 await self._write(CTRL, LOCK_TOGGLE)
@@ -194,9 +194,13 @@ class Seat:
     async def _start_session(self) -> None:
         """Turn on replies, send the PIN and read the lock state, as the app does on connect."""
         assert self._client
-        self._state_seen.clear()
         await self._client.start_notify(NOTIFY, self._on_notify)
         await self._write(SET_PARA, PIN_IN, PIN)
+        await self._read_lock()
+
+    async def _read_lock(self) -> None:
+        """Ask for the lock state and wait for the reply; no reply means the link isn't really working."""
+        self._state_seen.clear()
         await self._write(GET_STATE, CHILD_LOCK)
         await asyncio.wait_for(self._state_seen.wait(), 2)
 
@@ -206,15 +210,19 @@ class Seat:
         await self._client.write_gatt_char(WRITE, frame(self._counter, group, code, param), response=False)
 
     def _keep_alive(self) -> None:
-        if self._holding:
-            return
         if self._idle:
             self._idle.cancel()
+            self._idle = None
+        if self._holding:
+            return
         loop = asyncio.get_running_loop()
         # Stay connected past a full move so a stop never waits on a reconnect, then free the seat for the app.
         self._idle = loop.call_later(self.travel_seconds + 10, lambda: loop.create_task(self.disconnect()))
 
-    def _on_disconnect(self, _client: BleakClient) -> None:
+    def _on_disconnect(self, client: BleakClient) -> None:
+        # A link we already dropped can report in late, after a new one is up; only the current link counts.
+        if client is not self._client:
+            return
         self._client = None
         self._link_lost.set()
 
@@ -338,4 +346,15 @@ if __name__ == "__main__":
         assert holder.done() and not seat._busy.locked()
 
     asyncio.run(_disconnect_never_waits_on_a_reconnect())
+
+    async def _late_disconnect_is_ignored() -> None:
+        seat = Seat(BLEDevice("00:00:00:00:00:00", "test", None), 12.0)
+        old, live = _FailingClient(), _FailingClient()
+        seat._client = live
+        seat._on_disconnect(old)
+        assert seat._client is live and not seat._link_lost.is_set()
+        seat._on_disconnect(live)
+        assert seat._client is None and seat._link_lost.is_set()
+
+    asyncio.run(_late_disconnect_is_ignored())
     print("connection checks ok")
