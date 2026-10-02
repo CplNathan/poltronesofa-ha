@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 import logging
 
 from bleak import BleakClient
@@ -70,6 +70,7 @@ class Seat:
         self.locked: bool | None = None
         self._holding = False
         self._link_lost = asyncio.Event()
+        self._hold_task: asyncio.Task[None] | None = None
 
     def set_device(self, device: BLEDevice) -> None:
         self._device = device
@@ -107,6 +108,7 @@ class Seat:
     async def hold(self) -> None:
         """Keep the link open for good, reconnecting whenever it drops, until disconnect(). Blocks the phone app."""
         self._holding = True
+        self._hold_task = asyncio.current_task()
         retry = RECONNECT_SECONDS
         while self._holding:
             if self._client is None or not self._client.is_connected:
@@ -129,6 +131,13 @@ class Seat:
 
     async def disconnect(self) -> None:
         self._holding = False
+        # A reconnect can sit in a Bluetooth connect, holding the lock, for a minute or more;
+        # cancel it rather than wait, or unloading and shutdown hang.
+        holder, self._hold_task = self._hold_task, None
+        if holder and holder is not asyncio.current_task() and not holder.done():
+            holder.cancel()
+            with suppress(asyncio.CancelledError):
+                await holder
         async with self._busy:
             await self._drop()
 
@@ -311,8 +320,22 @@ if __name__ == "__main__":
         await asyncio.sleep(0.3)
         assert not holder.done() and calls >= 6, calls
         await seat.disconnect()
-        await asyncio.wait_for(holder, 1)
+        assert holder.done()
 
     logging.disable(logging.CRITICAL)
     asyncio.run(_hold_survives_any_error())
-    print("half-open link dropped, holding never idles, stale services retried, hold survives errors: ok")
+
+    async def _disconnect_never_waits_on_a_reconnect() -> None:
+        async def _endless_connect(*_args, **_kwargs):
+            await asyncio.sleep(3600)
+
+        globals()["establish_connection"] = _endless_connect
+        seat = Seat(BLEDevice("00:00:00:00:00:00", "test", None), 12.0)
+        holder = asyncio.create_task(seat.hold())
+        await asyncio.sleep(0.05)
+        assert seat._busy.locked()
+        await asyncio.wait_for(seat.disconnect(), 1)
+        assert holder.done() and not seat._busy.locked()
+
+    asyncio.run(_disconnect_never_waits_on_a_reconnect())
+    print("connection checks ok")
