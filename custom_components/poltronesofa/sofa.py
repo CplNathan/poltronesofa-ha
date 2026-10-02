@@ -38,6 +38,10 @@ PIN_IN = 0xF000
 
 DEFAULT_TRAVEL_SECONDS = 12.0
 RECONNECT_SECONDS = 5
+# bleak-retry-connector allows 20 s per attempt and 4 attempts. A seat that's reachable connects in a few
+# seconds, so give up sooner: a press fails fast and the adapter isn't tied up for over a minute.
+CONNECT_SECONDS = 10
+CONNECT_ATTEMPTS = 3
 MAX_RECONNECT_SECONDS = 60
 # ponytail: fixed PIN; make it an option once someone sets one in the app.
 PIN = 0
@@ -172,12 +176,14 @@ class Seat:
         if self._client and self._client.is_connected:
             return
         for attempt in range(2):
-            client = await establish_connection(
-                BleakClientWithServiceCache,
-                self._device,
-                self._device.name or self._device.address,
-                disconnected_callback=self._on_disconnect,
-            )
+            async with asyncio.timeout(CONNECT_SECONDS):
+                client = await establish_connection(
+                    BleakClientWithServiceCache,
+                    self._device,
+                    self._device.name or self._device.address,
+                    disconnected_callback=self._on_disconnect,
+                    max_attempts=CONNECT_ATTEMPTS,
+                )
             self._client = client
             try:
                 await self._start_session()
@@ -357,4 +363,22 @@ if __name__ == "__main__":
         assert seat._client is None and seat._link_lost.is_set()
 
     asyncio.run(_late_disconnect_is_ignored())
+
+    async def _connect_gives_up_in_time() -> None:
+        async def _endless_connect(*_args, **_kwargs):
+            await asyncio.sleep(3600)
+
+        globals()["establish_connection"] = _endless_connect
+        globals()["CONNECT_SECONDS"] = 0.05
+        seat = Seat(BLEDevice("00:00:00:00:00:00", "test", None), 12.0)
+        started = asyncio.get_running_loop().time()
+        try:
+            await seat.send(OPEN)
+            raise AssertionError("connect should time out")
+        except TimeoutError:
+            pass
+        assert asyncio.get_running_loop().time() - started < 0.5
+        assert not seat._busy.locked() and seat._client is None
+
+    asyncio.run(_connect_gives_up_in_time())
     print("connection checks ok")
